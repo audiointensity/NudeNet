@@ -5,6 +5,7 @@ import pydload
 import logging
 import numpy as np
 
+from io import BytesIO
 from PIL import Image as pil_image
 
 if pil_image is not None:
@@ -51,7 +52,7 @@ def load_img(
             "Could not import PIL.Image. " "The use of `load_img` requires PIL."
         )
 
-    if isinstance(path, (str, io.IOBase)):
+    if isinstance(path, (type(""), BytesIO)):
         img = pil_image.open(path)
     else:
         path = cv2.cvtColor(path, cv2.COLOR_BGR2RGB)
