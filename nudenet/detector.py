@@ -26,6 +26,18 @@ FILE_URLS = {
 }
 
 
+def _chunk(iterable, chunk_size):
+    """ Divide an iterable (generator, list) into parts of size chunk_size or less """
+    current = []
+    for e in iterable:
+        if len(current) >= chunk_size:
+            yield current
+            current = []
+        current.append(e)
+    if current:
+        yield current
+
+
 class Detector:
     detection_model = None
     classes = None
@@ -64,22 +76,20 @@ class Detector:
         indexed_frames, fps, video_length = get_interest_frames_from_video(
             video_path
         )
-        # TODO: Keep it lazy
-        indexed_frames = list(indexed_frames)
-        frame_indices = [frame.index for frame in indexed_frames]
-        frames = [frame.frame for frame in indexed_frames]
         logging.debug(
-            f"VIDEO_PATH: {video_path}, FPS: {fps}, Important frame indices: {frame_indices}, Video length: {video_length}"
+            f"VIDEO_PATH: {video_path}, FPS: {fps}, Video length: {video_length}"
         )
-        if mode == "fast":
-            frames = [
-                preprocess_image(frame, min_side=480, max_side=800) for frame in frames
-            ]
-        else:
-            frames = [preprocess_image(frame) for frame in frames]
 
-        scale = frames[0][1]
-        frames = [frame[0] for frame in frames]
+        def preprocess(indexed_frame):
+            if mode == "fast":
+                preprocessed_frame = preprocess_image(indexed_frame.frame, min_side=480,
+                                                      max_side=800)
+            else:
+                preprocessed_frame = preprocess_image(indexed_frame.frame)
+            return indexed_frame.with_frame(preprocessed_frame)
+
+        indexed_frames = (preprocess(iframe) for iframe in indexed_frames)
+
         all_results = {
             "metadata": {
                 "fps": fps,
@@ -89,16 +99,13 @@ class Detector:
             "preds": {},
         }
 
-        progress_func = progressbar
-
-        if not show_progress:
-            progress_func = dummy
-
-        for _ in progress_func(range(int(len(frames) / batch_size) + 1)):
-            batch = frames[:batch_size]
-            batch_indices = frame_indices[:batch_size]
-            frames = frames[batch_size:]
-            frame_indices = frame_indices[batch_size:]
+        scale = None
+        progress_func = dummy  # TODO: Restore, use latest frame index and the video_length
+        for frame_chunk in _chunk(indexed_frames, batch_size):
+            batch = [f.frame[0] for f in frame_chunk]
+            batch_indices = [f.index for f in frame_chunk]
+            if frame_chunk and scale is None:
+                scale = frame_chunk[0].frame[1]
             if batch_indices:
                 outputs = self.detection_model.run(
                     [s_i.name for s_i in self.detection_model.get_outputs()],

@@ -54,6 +54,9 @@ class IndexedFrame:
     index: int
     frame: None  # numpy array
 
+    def with_frame(self, new_frame):
+        return IndexedFrame(self.index, new_frame)
+
 
 @dataclass
 class Fifo:
@@ -85,24 +88,27 @@ def get_interest_frames_from_video(
     try:
         video = cv2.VideoCapture(video_path)
         fps = video.get(cv2.CAP_PROP_FPS)
-        length = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if skip_n_frames < 1:
-            skip_n_frames = int(skip_n_frames * fps)
-            logging.info(f"skip_n_frames: {skip_n_frames}")
-
         video_length = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
 
         def generate_important_frames():
+            logging.info(
+                f"Important frames will be processed from {video_path} of length {video_length}"
+            )
+
+            _skip_n_frames = skip_n_frames
+            if _skip_n_frames < 1:
+                _skip_n_frames = int(_skip_n_frames * fps)
+                logging.info(f"skip_n_frames: {_skip_n_frames}")
+
             past_frames = Fifo(similarity_context_n_frames)
-            for frame_i in range(length + 1):
+            for frame_i in range(video_length + 1):
                 read_flag, current_frame = video.read()
 
                 if not read_flag:
                     break
 
-                if skip_n_frames > 0:
-                    if frame_i % skip_n_frames != 0:
+                if _skip_n_frames > 0:
+                    if frame_i % _skip_n_frames != 0:
                         continue
 
                 frame_i += 1
@@ -132,10 +138,6 @@ def get_interest_frames_from_video(
                     yield new_frame
 
         important_frames = generate_important_frames()
-
-        logging.info(
-            f"Important frames will be processed from {video_path} of length {length}"
-        )
 
     except Exception as ex:
         logging.exception(ex, exc_info=True)
