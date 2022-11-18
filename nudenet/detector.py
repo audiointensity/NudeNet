@@ -107,7 +107,7 @@ class Detector:
 
                 boxes /= scale
                 for frame_index, frame_boxes, frame_scores, frame_labels in zip(
-                    frame_indices, boxes, scores, labels
+                    batch_indices, boxes, scores, labels
                 ):
                     if frame_index not in all_results["preds"]:
                         all_results["preds"][frame_index] = []
