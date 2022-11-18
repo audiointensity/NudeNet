@@ -61,9 +61,13 @@ class Detector:
     def detect_video(
         self, video_path, mode="default", min_prob=0.6, batch_size=2, show_progress=True
     ):
-        frame_indices, frames, fps, video_length = get_interest_frames_from_video(
+        indexed_frames, fps, video_length = get_interest_frames_from_video(
             video_path
         )
+        # TODO: Keep it lazy
+        indexed_frames = list(indexed_frames)
+        frame_indices = [frame.index for frame in indexed_frames]
+        frames = [frame.frame for frame in indexed_frames]
         logging.debug(
             f"VIDEO_PATH: {video_path}, FPS: {fps}, Important frame indices: {frame_indices}, Video length: {video_length}"
         )

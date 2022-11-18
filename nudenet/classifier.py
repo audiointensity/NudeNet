@@ -43,10 +43,13 @@ class Classifier:
         image_size=(256, 256),
         categories=["unsafe", "safe"],
     ):
-        frame_indices = None
-        frame_indices, frames, fps, video_length = get_interest_frames_from_video(
+        indexed_frames, fps, video_length = get_interest_frames_from_video(
             video_path
         )
+        # TODO: Keep it lazy
+        indexed_frames = list(indexed_frames)
+        frame_indices = [frame.index for frame in indexed_frames]
+        frames = [frame.frame for frame in indexed_frames]
         logging.debug(
             f"VIDEO_PATH: {video_path}, FPS: {fps}, Important frame indices: {frame_indices}, Video length: {video_length}"
         )
