@@ -59,3 +59,15 @@ def preprocess_image(
     image = _preprocess_image(image)
     image, scale = resize_image(image, min_side=min_side, max_side=max_side)
     return image, scale
+
+
+def chunk(iterable, chunk_size):
+    """ Split an iterable (generator, list) into parts of size chunk_size or less """
+    current = []
+    for e in iterable:
+        current.append(e)
+        if len(current) >= chunk_size:
+            yield current
+            current = []
+    if current:
+        yield current

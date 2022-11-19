@@ -7,7 +7,7 @@ import onnxruntime
 from progressbar import ProgressBar
 import progressbar.widgets as widgets
 
-from .detector_utils import preprocess_image
+from .detector_utils import preprocess_image, chunk
 from .video_utils import get_interest_frames_from_video
 
 FILE_URLS = {
@@ -20,18 +20,6 @@ FILE_URLS = {
         "classes": "https://github.com/notAI-tech/NudeNet/releases/download/v0/detector_v2_base_classes",
     },
 }
-
-
-def _chunk(iterable, chunk_size):
-    """ Divide an iterable (generator, list) into parts of size chunk_size or less """
-    current = []
-    for e in iterable:
-        if len(current) >= chunk_size:
-            yield current
-            current = []
-        current.append(e)
-    if current:
-        yield current
 
 
 class DummyProgressBar:
@@ -109,7 +97,7 @@ class Detector:
         scale = None
         with (ProgressBar(max_value=video_length) if show_progress else
               DummyProgressBar()) as progress:
-            for frame_chunk in _chunk(indexed_frames, batch_size):
+            for frame_chunk in chunk(indexed_frames, batch_size):
                 if frame_chunk:
                     progress.update(frame_chunk[0].index)
                 batch = [f.frame[0] for f in frame_chunk]

@@ -5,8 +5,9 @@ import numpy as np
 import onnxruntime
 import pydload
 
-from .image_utils import load_images
+from .image_utils import load_indexed_images
 from .video_utils import get_interest_frames_from_video
+from .detector_utils import chunk
 
 
 class Classifier:
@@ -45,29 +46,25 @@ class Classifier:
         indexed_frames, fps, video_length = get_interest_frames_from_video(
             video_path
         )
-        # TODO: Keep it lazy
-        indexed_frames = list(indexed_frames)
-        frame_indices = [frame.index for frame in indexed_frames]
-        frames = [frame.frame for frame in indexed_frames]
         logging.debug(
-            f"VIDEO_PATH: {video_path}, FPS: {fps}, Important frame indices: {frame_indices}, Video length: {video_length}"
+            f"VIDEO_PATH: {video_path}, FPS: {fps}, Video length: {video_length}"
         )
 
-        frames, frame_names = load_images(frames, image_size, image_names=frame_indices)
-
-        if not frame_names:
-            return {}
+        indexed_frames = load_indexed_images(indexed_frames, image_size)
 
         preds = []
         model_preds = []
-        while len(frames):
+        frame_names = []
+        for frame_chunk in chunk(indexed_frames, batch_size):
+            frames = [f.frame for f in frame_chunk]
+            frame_names += [f.index for f in frame_chunk]
+
             _model_preds = self.nsfw_model.run(
                 [self.nsfw_model.get_outputs()[0].name],
-                {self.nsfw_model.get_inputs()[0].name: frames[:batch_size]},
+                {self.nsfw_model.get_inputs()[0].name: frames},
             )[0]
             model_preds.append(_model_preds)
             preds += np.argsort(_model_preds, axis=1).tolist()
-            frames = frames[batch_size:]
 
         probs = []
         for i, single_preds in enumerate(preds):
