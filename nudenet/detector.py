@@ -4,15 +4,11 @@ import pydload
 import logging
 import numpy as np
 import onnxruntime
-from progressbar import progressbar
+from progressbar import ProgressBar
+import progressbar.widgets as widgets
 
 from .detector_utils import preprocess_image
 from .video_utils import get_interest_frames_from_video
-
-
-def dummy(x):
-    return x
-
 
 FILE_URLS = {
     "default": {
@@ -36,6 +32,17 @@ def _chunk(iterable, chunk_size):
         current.append(e)
     if current:
         yield current
+
+
+class DummyProgressBar:
+    def __enter__(self):
+        return self
+
+    def update(self, p):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 class Detector:
@@ -100,44 +107,47 @@ class Detector:
         }
 
         scale = None
-        progress_func = dummy  # TODO: Restore, use latest frame index and the video_length
-        for frame_chunk in _chunk(indexed_frames, batch_size):
-            batch = [f.frame[0] for f in frame_chunk]
-            batch_indices = [f.index for f in frame_chunk]
-            if frame_chunk and scale is None:
-                scale = frame_chunk[0].frame[1]
-            if batch_indices:
-                outputs = self.detection_model.run(
-                    [s_i.name for s_i in self.detection_model.get_outputs()],
-                    {self.detection_model.get_inputs()[0].name: np.asarray(batch)},
-                )
+        with (ProgressBar(max_value=video_length) if show_progress else
+              DummyProgressBar()) as progress:
+            for frame_chunk in _chunk(indexed_frames, batch_size):
+                if frame_chunk:
+                    progress.update(frame_chunk[0].index)
+                batch = [f.frame[0] for f in frame_chunk]
+                batch_indices = [f.index for f in frame_chunk]
+                if frame_chunk and scale is None:
+                    scale = frame_chunk[0].frame[1]
+                if batch_indices:
+                    outputs = self.detection_model.run(
+                        [s_i.name for s_i in self.detection_model.get_outputs()],
+                        {self.detection_model.get_inputs()[0].name: np.asarray(batch)},
+                    )
 
-                labels = [op for op in outputs if op.dtype == "int32"][0]
-                scores = [op for op in outputs if isinstance(op[0][0], np.float32)][0]
-                boxes = [op for op in outputs if isinstance(op[0][0], np.ndarray)][0]
+                    labels = [op for op in outputs if op.dtype == "int32"][0]
+                    scores = [op for op in outputs if isinstance(op[0][0], np.float32)][0]
+                    boxes = [op for op in outputs if isinstance(op[0][0], np.ndarray)][0]
 
-                boxes /= scale
-                for frame_index, frame_boxes, frame_scores, frame_labels in zip(
-                    batch_indices, boxes, scores, labels
-                ):
-                    if frame_index not in all_results["preds"]:
-                        all_results["preds"][frame_index] = []
-
-                    for box, score, label in zip(
-                        frame_boxes, frame_scores, frame_labels
+                    boxes /= scale
+                    for frame_index, frame_boxes, frame_scores, frame_labels in zip(
+                        batch_indices, boxes, scores, labels
                     ):
-                        if score < min_prob:
-                            continue
-                        box = box.astype(int).tolist()
-                        label = self.classes[label]
+                        if frame_index not in all_results["preds"]:
+                            all_results["preds"][frame_index] = []
 
-                        all_results["preds"][frame_index].append(
-                            {
-                                "box": [int(c) for c in box],
-                                "score": float(score),
-                                "label": label,
-                            }
-                        )
+                        for box, score, label in zip(
+                            frame_boxes, frame_scores, frame_labels
+                        ):
+                            if score < min_prob:
+                                continue
+                            box = box.astype(int).tolist()
+                            label = self.classes[label]
+
+                            all_results["preds"][frame_index].append(
+                                {
+                                    "box": [int(c) for c in box],
+                                    "score": float(score),
+                                    "label": label,
+                                }
+                            )
 
         return all_results
 
