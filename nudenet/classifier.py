@@ -1,13 +1,12 @@
-import os
-import cv2
-import tarfile
-import pydload
 import logging
+import os
+
 import numpy as np
 import onnxruntime
-from .video_utils import get_interest_frames_from_video
+import pydload
+
 from .image_utils import load_images
-from PIL import Image as pil_image
+from .video_utils import get_interest_frames_from_video
 
 
 class Classifier:
