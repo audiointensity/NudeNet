@@ -147,3 +147,16 @@ def load_images(image_paths, image_size, image_names):
             logging.exception(f"Error reading {img_path} {ex}", exc_info=True)
 
     return np.asarray(loaded_images), loaded_image_paths
+
+
+def load_indexed_images(indexed_frames, image_size):
+    for indexed_frame in indexed_frames:
+        try:
+            image = load_img(indexed_frame.frame, target_size=image_size)
+            if image is None:
+                continue
+            image = img_to_array(image)
+            image /= 255
+            yield indexed_frame.with_frame(image)
+        except Exception as ex:
+            logging.exception(f"Error reading frame {indexed_frame.index} {ex}", exc_info=True)

@@ -1,6 +1,7 @@
 import cv2
 import os
 import logging
+from dataclasses import dataclass, field
 
 # logging.basicConfig(level=logging.DEBUG)
 
@@ -48,6 +49,29 @@ def is_similar_frame(f1, f2, resize_to=(64, 64), thresh=0.5, return_score=False)
     return False
 
 
+@dataclass
+class IndexedFrame:
+    index: int
+    frame: None  # numpy array
+
+    def with_frame(self, new_frame):
+        return IndexedFrame(self.index, new_frame)
+
+
+@dataclass
+class Fifo:
+    length: int
+    _list: list = field(default_factory=list)
+
+    def push(self, new_element):
+        self._list.append(new_element)
+        self._list = self._list[-self.length:]
+        return new_element
+
+    def list(self):
+        return self._list
+
+
 def get_interest_frames_from_video(
     video_path,
     frame_similarity_threshold=0.5,
@@ -64,63 +88,61 @@ def get_interest_frames_from_video(
     try:
         video = cv2.VideoCapture(video_path)
         fps = video.get(cv2.CAP_PROP_FPS)
-        length = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if skip_n_frames < 1:
-            skip_n_frames = int(skip_n_frames * fps)
-            logging.info(f"skip_n_frames: {skip_n_frames}")
-
         video_length = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        for frame_i in range(length + 1):
-            read_flag, current_frame = video.read()
+        def generate_important_frames():
+            logging.info(
+                f"Important frames will be processed from {video_path} of length {video_length}"
+            )
 
-            if not read_flag:
-                break
+            _skip_n_frames = skip_n_frames
+            if _skip_n_frames < 1:
+                _skip_n_frames = int(_skip_n_frames * fps)
+                logging.info(f"skip_n_frames: {_skip_n_frames}")
 
-            if skip_n_frames > 0:
-                if frame_i % skip_n_frames != 0:
-                    continue
+            past_frames = Fifo(similarity_context_n_frames)
+            for frame_i in range(video_length + 1):
+                read_flag, current_frame = video.read()
 
-            frame_i += 1
-
-            found_similar = False
-            for context_frame_i, context_frame in reversed(
-                important_frames[-1 * similarity_context_n_frames :]
-            ):
-                if is_similar_frame(
-                    context_frame, current_frame, thresh=frame_similarity_threshold
-                ):
-                    logging.debug(f"{frame_i} is similar to {context_frame_i}")
-                    found_similar = True
+                if not read_flag:
                     break
 
-            if not found_similar:
-                logging.debug(f"{frame_i} is added to important frames")
-                important_frames.append((frame_i, current_frame))
-                if output_frames_to_dir:
-                    if not os.path.exists(output_frames_to_dir):
-                        os.mkdir(output_frames_to_dir)
+                if _skip_n_frames > 0:
+                    if frame_i % _skip_n_frames != 0:
+                        continue
 
-                    output_frames_to_dir = output_frames_to_dir.rstrip("/")
-                    cv2.imwrite(
-                        f"{output_frames_to_dir}/{str(frame_i).zfill(10)}.png",
-                        current_frame,
-                    )
+                frame_i += 1
 
-        logging.info(
-            f"{len(important_frames)} important frames will be processed from {video_path} of length {length}"
-        )
+                found_similar = False
+                for context_frame in reversed(past_frames.list()):
+                    if is_similar_frame(
+                        context_frame.frame, current_frame, thresh=frame_similarity_threshold
+                    ):
+                        logging.debug(f"{frame_i} is similar to {context_frame.index}")
+                        found_similar = True
+                        break
+
+                if not found_similar:
+                    logging.debug(f"{frame_i} is added to important frames")
+                    new_frame = IndexedFrame(frame_i, current_frame)
+                    past_frames.push(new_frame)
+                    if output_frames_to_dir:
+                        if not os.path.exists(output_frames_to_dir):
+                            os.mkdir(output_frames_to_dir)
+
+                        stripped_dir = output_frames_to_dir.rstrip("/")
+                        cv2.imwrite(
+                            f"{stripped_dir}/{str(frame_i).zfill(10)}.png",
+                            current_frame,
+                        )
+                    yield new_frame
+
+        important_frames = generate_important_frames()
 
     except Exception as ex:
         logging.exception(ex, exc_info=True)
 
-    return (
-        [i[0] for i in important_frames],
-        [i[1] for i in important_frames],
-        fps,
-        video_length,
-    )
+    return important_frames, fps, video_length
 
 
 if __name__ == "__main__":
@@ -129,4 +151,4 @@ if __name__ == "__main__":
     imp_frames = get_interest_frames_from_video(
         sys.argv[1], output_frames_to_dir="./frames/"
     )
-    print([i[0] for i in imp_frames])
+    print([i[0].index for i in imp_frames])

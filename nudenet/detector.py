@@ -4,15 +4,11 @@ import pydload
 import logging
 import numpy as np
 import onnxruntime
-from progressbar import progressbar
+from progressbar import ProgressBar
+import progressbar.widgets as widgets
 
-from .detector_utils import preprocess_image
+from .detector_utils import preprocess_image, chunk
 from .video_utils import get_interest_frames_from_video
-
-
-def dummy(x):
-    return x
-
 
 FILE_URLS = {
     "default": {
@@ -24,6 +20,17 @@ FILE_URLS = {
         "classes": "https://github.com/notAI-tech/NudeNet/releases/download/v0/detector_v2_base_classes",
     },
 }
+
+
+class DummyProgressBar:
+    def __enter__(self):
+        return self
+
+    def update(self, p):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 class Detector:
@@ -61,21 +68,23 @@ class Detector:
     def detect_video(
         self, video_path, mode="default", min_prob=0.6, batch_size=2, show_progress=True
     ):
-        frame_indices, frames, fps, video_length = get_interest_frames_from_video(
+        indexed_frames, fps, video_length = get_interest_frames_from_video(
             video_path
         )
         logging.debug(
-            f"VIDEO_PATH: {video_path}, FPS: {fps}, Important frame indices: {frame_indices}, Video length: {video_length}"
+            f"VIDEO_PATH: {video_path}, FPS: {fps}, Video length: {video_length}"
         )
-        if mode == "fast":
-            frames = [
-                preprocess_image(frame, min_side=480, max_side=800) for frame in frames
-            ]
-        else:
-            frames = [preprocess_image(frame) for frame in frames]
 
-        scale = frames[0][1]
-        frames = [frame[0] for frame in frames]
+        def preprocess(indexed_frame):
+            if mode == "fast":
+                preprocessed_frame = preprocess_image(indexed_frame.frame, min_side=480,
+                                                      max_side=800)
+            else:
+                preprocessed_frame = preprocess_image(indexed_frame.frame)
+            return indexed_frame.with_frame(preprocessed_frame)
+
+        indexed_frames = (preprocess(iframe) for iframe in indexed_frames)
+
         all_results = {
             "metadata": {
                 "fps": fps,
@@ -85,48 +94,48 @@ class Detector:
             "preds": {},
         }
 
-        progress_func = progressbar
+        scale = None
+        with (ProgressBar(max_value=video_length) if show_progress else
+              DummyProgressBar()) as progress:
+            for frame_chunk in chunk(indexed_frames, batch_size):
+                if frame_chunk:
+                    progress.update(frame_chunk[0].index)
+                batch = [f.frame[0] for f in frame_chunk]
+                batch_indices = [f.index for f in frame_chunk]
+                if frame_chunk and scale is None:
+                    scale = frame_chunk[0].frame[1]
+                if batch_indices:
+                    outputs = self.detection_model.run(
+                        [s_i.name for s_i in self.detection_model.get_outputs()],
+                        {self.detection_model.get_inputs()[0].name: np.asarray(batch)},
+                    )
 
-        if not show_progress:
-            progress_func = dummy
+                    labels = [op for op in outputs if op.dtype == "int32"][0]
+                    scores = [op for op in outputs if isinstance(op[0][0], np.float32)][0]
+                    boxes = [op for op in outputs if isinstance(op[0][0], np.ndarray)][0]
 
-        for _ in progress_func(range(int(len(frames) / batch_size) + 1)):
-            batch = frames[:batch_size]
-            batch_indices = frame_indices[:batch_size]
-            frames = frames[batch_size:]
-            frame_indices = frame_indices[batch_size:]
-            if batch_indices:
-                outputs = self.detection_model.run(
-                    [s_i.name for s_i in self.detection_model.get_outputs()],
-                    {self.detection_model.get_inputs()[0].name: np.asarray(batch)},
-                )
-
-                labels = [op for op in outputs if op.dtype == "int32"][0]
-                scores = [op for op in outputs if isinstance(op[0][0], np.float32)][0]
-                boxes = [op for op in outputs if isinstance(op[0][0], np.ndarray)][0]
-
-                boxes /= scale
-                for frame_index, frame_boxes, frame_scores, frame_labels in zip(
-                    batch_indices, boxes, scores, labels
-                ):
-                    if frame_index not in all_results["preds"]:
-                        all_results["preds"][frame_index] = []
-
-                    for box, score, label in zip(
-                        frame_boxes, frame_scores, frame_labels
+                    boxes /= scale
+                    for frame_index, frame_boxes, frame_scores, frame_labels in zip(
+                        batch_indices, boxes, scores, labels
                     ):
-                        if score < min_prob:
-                            continue
-                        box = box.astype(int).tolist()
-                        label = self.classes[label]
+                        if frame_index not in all_results["preds"]:
+                            all_results["preds"][frame_index] = []
 
-                        all_results["preds"][frame_index].append(
-                            {
-                                "box": [int(c) for c in box],
-                                "score": float(score),
-                                "label": label,
-                            }
-                        )
+                        for box, score, label in zip(
+                            frame_boxes, frame_scores, frame_labels
+                        ):
+                            if score < min_prob:
+                                continue
+                            box = box.astype(int).tolist()
+                            label = self.classes[label]
+
+                            all_results["preds"][frame_index].append(
+                                {
+                                    "box": [int(c) for c in box],
+                                    "score": float(score),
+                                    "label": label,
+                                }
+                            )
 
         return all_results
 
